@@ -1,83 +1,97 @@
-import { Router } from 'itty-router'
-import sgMail from '@sendgrid/mail'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import sgMail from '@sendgrid/mail';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 
-sgMail.setApiKey('YOUR_SENDGRID_API_KEY');
-const genAI = new GoogleGenerativeAI('YOUR_GEN_AI_API_KEY');
-
-const router = Router()
+sgMail.setApiKey(SENDGRID_API_KEY);
+const genAI = new GoogleGenerativeAI(GEN_AI_API_KEY);
 
 
-const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+async function handleRequest(request) {
+    const { method, url } = request;
+    const parsedUrl = new URL(url);
+    
+    if (parsedUrl.pathname === '/' && method === 'GET') {
+        return new Response('Hello from Cloudflare Workers!', { status: 200 });
+    } else if (parsedUrl.pathname === '/Reg-email' && method === 'POST') {
+        const data = await request.json();
+        return sendEmail(data.userEmail);
+    } else if (parsedUrl.pathname === '/send-email' && method === 'POST') {
+        const formData = await request.formData();
+        return handleSendEmail(formData);
+    } else if (parsedUrl.pathname === '/bulk-email' && method === 'POST') {
+        const formData = await request.formData();
+        return handleBulkEmail(formData);
+    } else if (parsedUrl.pathname === '/generateAI' && method === 'POST') {
+        const data = await request.json();
+        return generateAIContent(data.prompt);
+    }
+
+    return new Response('Not Found', { status: 404 });
 }
 
 
-router.options('*', () => new Response(null, { headers: corsHeaders }))
-
-
-router.get('/', () => {
-    return new Response('Hello from Cloudflare Workers!', {
-        headers: { 'Content-Type': 'text/plain', ...corsHeaders },
-    })
-})
-
-
-router.post('/Reg-email', async request => {
-    const { userEmail } = await request.json()
-
+async function sendEmail(userEmail) {
     const msg = {
         to: userEmail,
-        from: 'your-email@example.com',
+        from: 'xtan0108@gmail.com',
         subject: 'Event Registration Confirmation',
         text: 'You have successfully registered for the event.',
-    }
+    };
 
     try {
-        await sgMail.send(msg)
-        return new Response(JSON.stringify({ message: 'Email sent successfully!' }), {
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            status: 200,
-        })
+        await sgMail.send(msg);
+        return new Response(JSON.stringify({ message: 'Email sent successfully!' }), { status: 200 });
     } catch (error) {
-        console.error('Error sending email:', error)
-        return new Response(JSON.stringify({ message: 'Failed to send email.' }), {
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            status: 500,
-        })
-    }
-})
-
-
-router.post('/generateAI', async request => {
-    const { prompt } = await request.json()
-
-    try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
-        const result = await model.generateContent([prompt])
-
-        return new Response(JSON.stringify({ response: result.response.text() }), {
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            status: 200,
-        })
-    } catch (error) {
-        console.error('Error generating content:', error)
-        return new Response(JSON.stringify({ error: 'Failed to generate content using Gemini AI' }), {
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            status: 500,
-        })
-    }
-})
-
-
-export default {
-    async fetch(request) {
-        return router.handle(request).catch(err => {
-            console.error('Unhandled error:', err)
-            return new Response('Internal Server Error', { status: 500 })
-        })
+        console.error('Error sending email:', error.message);
+        return new Response(JSON.stringify({ message: 'Failed to send email.' }), { status: 500 });
     }
 }
+
+async function handleSendEmail(formData) {
+    const from = formData.get('from');
+    const subject = formData.get('subject');
+    const text = formData.get('text');
+    const attachments = [];
+
+    for (let file of formData.getAll('attachments')) {
+        const content = await file.arrayBuffer();
+        attachments.push({
+            content: btoa(String.fromCharCode(...new Uint8Array(content))),
+            filename: file.name,
+            type: file.type,
+            disposition: 'attachment',
+        });
+    }
+
+    const msg = {
+        to: 'xtan0108@gmail.com',
+        from,
+        subject,
+        text,
+        attachments,
+    };
+
+    try {
+        await sgMail.send(msg);
+        return new Response('Email sent successfully', { status: 200 });
+    } catch (error) {
+        console.error('Error sending email:', error);
+        return new Response('Error sending email', { status: 500 });
+    }
+}
+
+async function generateAIContent(prompt) {
+    try {
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const result = await model.generateContent([prompt]);
+        return new Response(JSON.stringify({ response: result.response.text() }), { status: 200 });
+    } catch (error) {
+        console.error('Error generating content:', error);
+        return new Response('Failed to generate content using Gemini AI', { status: 500 });
+    }
+}
+
+
+addEventListener('fetch', event => {
+    event.respondWith(handleRequest(event.request));
+});
